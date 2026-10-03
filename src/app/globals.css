@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+:root {
+  --ink: #0f1a2b;        /* deep navy, Vetray base */
+  --paper: #f5f3ee;      /* warm off-white */
+  --line: #d9d5cb;
+  --muted: #5b6475;
+  --accent: #1f6f5c;     /* restrained green: "conversation open" */
+  --warn: #b4532a;       /* handoff to human */
+}
+
+@theme inline {
+  --color-ink: var(--ink);
+  --color-paper: var(--paper);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-warn: var(--warn);
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-grotesk);
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+.field {
+  @apply w-full border border-line bg-white px-3 py-2 text-sm outline-none focus:border-ink;
+}
+.btn {
+  @apply inline-flex items-center justify-center bg-ink px-4 py-2 text-sm font-medium text-paper hover:bg-accent disabled:opacity-50;
+}
+.btn-ghost {
+  @apply inline-flex items-center justify-center border border-ink px-3 py-1.5 text-sm hover:bg-ink hover:text-paper;
+}
+.label {
+  @apply mb-1 block text-xs font-semibold uppercase tracking-wider text-muted;
+}
