@@ -1,0 +1,152 @@
+{
+  "name": "Vetray WhatsApp Bot",
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Istanbul", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all" },
+  "nodes": [
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000001",
+      "name": "WhatsApp Gelen",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [0, 300],
+      "webhookId": "a1f0c001-0000-4000-8000-0000000000aa",
+      "parameters": { "httpMethod": "POST", "path": "vetray-wa-63072b4bf1c7613b9b", "responseMode": "onReceived", "options": {} }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000002",
+      "name": "Mesajı Ayrıştır",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [220, 300],
+      "notes": "Evolution adresi ve instance adı burada. Evolution kurulunca doldurun.",
+      "parameters": {
+        "jsCode": "// Evolution ayarları: Railway kurulumundan sonra doldurun\nconst EVOLUTION_URL = 'https://EVOLUTION-ADRESI.up.railway.app';\nconst EVOLUTION_INSTANCE = 'vetray';\n\nconst out = [];\nfor (const item of $input.all()) {\n  const b = item.json.body ?? item.json;\n  if (b.event !== 'messages.upsert') continue;\n  if (b.instance && b.instance !== EVOLUTION_INSTANCE) continue;\n  const d = b.data ?? {};\n  const k = d.key ?? {};\n  let jid = k.remoteJid ?? '';\n  if (jid.endsWith('@lid')) jid = k.remoteJidAlt ?? k.senderPn ?? d.senderPn ?? '';\n  // Yalnızca birebir sohbetler: grup, durum ve kanal mesajları atlanır\n  if (!jid.endsWith('@s.whatsapp.net')) continue;\n  const m = d.message ?? {};\n  const text = m.conversation ?? m.extendedTextMessage?.text ?? m.imageMessage?.caption ?? m.videoMessage?.caption ?? m.documentMessage?.caption ?? '';\n  out.push({ json: {\n    wa_number: jid.split('@')[0],\n    name: k.fromMe ? '' : (d.pushName ?? ''),\n    text,\n    wa_message_id: k.id ?? '',\n    from_me: Boolean(k.fromMe),\n    evolution_url: EVOLUTION_URL.replace(/\\/$/, ''),\n    evolution_instance: EVOLUTION_INSTANCE,\n  } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000003",
+      "name": "Supabase: Mesajı Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://kvvnkiipfpdujwbwzmfo.supabase.co/rest/v1/rpc/handle_incoming",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p: { wa_number: $json.wa_number, name: $json.name, text: $json.text, wa_message_id: $json.wa_message_id, from_me: $json.from_me } }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000004",
+      "name": "Bot cevap versin mi?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, 300],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            { "id": "c1", "leftValue": "={{ $json.should_reply }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000005",
+      "name": "İstemi Hazırla",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 200],
+      "parameters": {
+        "jsCode": "const r = $json;\n\n// Ardışık aynı roldeki mesajları birleştir, ilk mesaj müşteriden olsun\nconst messages = [];\nfor (const h of r.history ?? []) {\n  if (!h.content) continue;\n  const last = messages[messages.length - 1];\n  if (last && last.role === h.role) last.content += '\\n' + h.content;\n  else messages.push({ role: h.role, content: h.content });\n}\nwhile (messages.length && messages[0].role !== 'user') messages.shift();\n\nconst system = [\n  'Siz Vetray adına WhatsApp üzerinden gelen mesajlara cevap veren asistansınız.',\n  'Her zaman resmi ve kibar konuşun, Türkçede \"siz\" dili kullanın. Müşteri İngilizce yazarsa kibar ve resmi İngilizce ile cevap verin. Kısa ve net yazın, WhatsApp mesajı uzunluğunda.',\n  'Yalnızca aşağıdaki işletme bilgisine dayanın. Bilmediğiniz fiyat, tarih veya taahhüt uydurmayın; bu durumda ekibin dönüş yapacağını söyleyin.',\n  'Müşteri bir kişiyle görüşmek isterse, teklif, sözleşme veya ödeme konusuna geçerse, şikayet ederse ya da cevap işletme bilgisinde yoksa handoff alanını true yapın ve ekibin kısa sürede dönüş yapacağını yazın.',\n  r.system_prompt ? 'Konuşma tarzı:\\n' + r.system_prompt : '',\n  'İşletme bilgisi:\\n' + (r.business_info || '(henüz girilmedi)'),\n].filter(Boolean).join('\\n\\n');\n\nreturn [{ json: {\n  conversation_id: r.conversation_id,\n  wa_number: r.wa_number,\n  body: {\n    model: 'claude-opus-5-5',\n    max_tokens: 4000,\n    fallbacks: 'default',\n    output_config: {\n      effort: 'low',\n      format: {\n        type: 'json_schema',\n        schema: {\n          type: 'object',\n          properties: { reply: { type: 'string' }, handoff: { type: 'boolean' } },\n          required: ['reply', 'handoff'],\n          additionalProperties: false,\n        },\n      },\n    },\n    system,\n    messages,\n  },\n} }];"
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000006",
+      "name": "Claude: Cevap Yaz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 200],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": { "anthropicApi": { "id": "ikq64kCoXN0OVqMJ", "name": "Anthropic account" } },
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "anthropic-beta", "value": "server-side-fallback-2026-07-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": { "timeout": 120000 }
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000007",
+      "name": "Cevabı Ayrıştır",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 200],
+      "parameters": {
+        "jsCode": "const res = $json;\nconst prev = $('İstemi Hazırla').first().json;\nconst fallback = { reply: 'Mesajınız için teşekkür ederiz. Ekibimiz en kısa sürede size dönüş yapacaktır.', handoff: true };\n\nlet parsed = fallback;\nif (res.stop_reason !== 'refusal') {\n  const textBlock = (res.content ?? []).filter((c) => c.type === 'text').pop();\n  try {\n    const p = JSON.parse(textBlock?.text ?? '');\n    if (typeof p.reply === 'string' && p.reply.trim()) parsed = { reply: p.reply.trim(), handoff: Boolean(p.handoff) };\n  } catch (e) {}\n}\n\nreturn [{ json: { conversation_id: prev.conversation_id, wa_number: prev.wa_number, reply: parsed.reply, handoff: parsed.handoff } }];"
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000008",
+      "name": "Evolution: WhatsApp Gönder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Mesajı Ayrıştır').first().json.evolution_url }}/message/sendText/{{ $('Mesajı Ayrıştır').first().json.evolution_instance }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.wa_number, text: $json.reply }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "a1f0c001-0000-4000-8000-000000000009",
+      "name": "Supabase: Bot Cevabını Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1760, 200],
+      "parameters": {
+        "method": "POST",
+        "url": "https://kvvnkiipfpdujwbwzmfo.supabase.co/rest/v1/rpc/record_bot_reply",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p: { conversation_id: $('Cevabı Ayrıştır').first().json.conversation_id, text: $('Cevabı Ayrıştır').first().json.reply, wa_message_id: $json.key?.id ?? '', handoff: $('Cevabı Ayrıştır').first().json.handoff } }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "WhatsApp Gelen": { "main": [[{ "node": "Mesajı Ayrıştır", "type": "main", "index": 0 }]] },
+    "Mesajı Ayrıştır": { "main": [[{ "node": "Supabase: Mesajı Kaydet", "type": "main", "index": 0 }]] },
+    "Supabase: Mesajı Kaydet": { "main": [[{ "node": "Bot cevap versin mi?", "type": "main", "index": 0 }]] },
+    "Bot cevap versin mi?": { "main": [[{ "node": "İstemi Hazırla", "type": "main", "index": 0 }], []] },
+    "İstemi Hazırla": { "main": [[{ "node": "Claude: Cevap Yaz", "type": "main", "index": 0 }]] },
+    "Claude: Cevap Yaz": { "main": [[{ "node": "Cevabı Ayrıştır", "type": "main", "index": 0 }]] },
+    "Cevabı Ayrıştır": { "main": [[{ "node": "Evolution: WhatsApp Gönder", "type": "main", "index": 0 }]] },
+    "Evolution: WhatsApp Gönder": { "main": [[{ "node": "Supabase: Bot Cevabını Kaydet", "type": "main", "index": 0 }]] }
+  }
+}
