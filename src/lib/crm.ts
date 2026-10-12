@@ -28,7 +28,9 @@ export function formatTime(iso: string | null) {
   }).format(new Date(iso));
 }
 
-export function formatPhone(wa: string) {
+// Website form contacts have no WhatsApp number.
+export function formatPhone(wa: string | null) {
+  if (!wa) return "Web formu";
   const d = wa.replace(/\D/g, "");
   return d.startsWith("90") && d.length === 12
     ? `+90 ${d.slice(2, 5)} ${d.slice(5, 8)} ${d.slice(8, 10)} ${d.slice(10)}`

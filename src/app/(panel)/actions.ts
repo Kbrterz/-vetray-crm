@@ -21,11 +21,13 @@ export async function sendReply(conversationId: string, _: string | null, form: 
   const supabase = await createClient();
   const { data: conv } = await supabase
     .from("conversations")
-    .select("id, contacts(wa_number)")
+    .select("id, contacts(wa_number, email)")
     .eq("id", conversationId)
     .single();
-  const wa = (conv?.contacts as unknown as { wa_number: string } | null)?.wa_number;
-  if (!wa) return "Konuşma bulunamadı.";
+  const contact = conv?.contacts as unknown as { wa_number: string | null; email: string | null } | null;
+  if (!contact) return "Konuşma bulunamadı.";
+  const wa = contact.wa_number;
+  if (!wa) return `Bu kişi web formundan geldi, WhatsApp numarası yok. E-posta ile yanıtlayın: ${contact.email ?? "-"}`;
 
   const sent = await sendWhatsAppText(wa, text);
   if (!sent.ok) return sent.error;

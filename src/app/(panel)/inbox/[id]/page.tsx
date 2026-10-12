@@ -10,7 +10,7 @@ type Contact = {
   name: string | null;
   company: string | null;
   email: string | null;
-  wa_number: string;
+  wa_number: string | null;
   stage: string;
   is_personal: boolean;
 };
@@ -52,9 +52,9 @@ export default async function ConversationPage({ params }: PageProps<"/inbox/[id
         <section className="flex min-h-[60vh] flex-col border border-line bg-white">
           <header className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-4">
             <div>
-              <h1 className="font-display text-xl font-bold">{contact.name || formatPhone(contact.wa_number)}</h1>
+              <h1 className="font-display text-xl font-bold">{contact.name || contact.email || formatPhone(contact.wa_number)}</h1>
               <p className="text-xs text-muted">
-                {formatPhone(contact.wa_number)} · {STATUS_LABEL[conv.status]}
+                {contact.wa_number ? formatPhone(contact.wa_number) : `Web formu · ${contact.email ?? ""}`} · {STATUS_LABEL[conv.status]}
               </p>
             </div>
             <div className="flex gap-2">
