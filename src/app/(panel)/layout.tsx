@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { signOut } from "@/app/login/actions";
+import { createClient } from "@/lib/supabase/server";
+import { getWaitingConversationIds } from "@/lib/handoff";
 import { NavLinks } from "./nav-links";
 
-export default function PanelLayout({ children }: { children: React.ReactNode }) {
+export default async function PanelLayout({ children }: { children: React.ReactNode }) {
+  const waiting = await getWaitingConversationIds(await createClient());
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       <aside className="flex shrink-0 flex-col bg-ink text-paper md:w-56">
@@ -14,7 +17,7 @@ export default function PanelLayout({ children }: { children: React.ReactNode })
             <button className="text-xs text-paper/70 underline">Çıkış</button>
           </form>
         </div>
-        <NavLinks />
+        <NavLinks waitingCount={waiting.size} />
         <form action={signOut} className="mt-auto hidden p-6 md:block">
           <button className="text-xs text-paper/70 underline hover:text-paper">Çıkış yap</button>
         </form>

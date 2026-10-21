@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { getWaitingConversationIds } from "@/lib/handoff";
 import { STATUS_LABEL, formatPhone, formatTime } from "@/lib/crm";
 
 const FILTERS = [
@@ -21,7 +22,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/inbox">) {
     .order("last_message_at", { ascending: false, nullsFirst: false })
     .limit(100);
   if (filter) query = query.eq("status", filter);
-  const { data } = await query;
+  const [{ data }, waiting] = await Promise.all([query, getWaitingConversationIds(supabase)]);
 
   return (
     <div className="space-y-6">
@@ -42,8 +43,9 @@ export default async function InboxPage({ searchParams }: PageProps<"/inbox">) {
         <ul className="divide-y divide-line border border-line bg-white">
           {data.map((c) => {
             const contact = c.contacts as unknown as { name: string | null; wa_number: string; company: string | null };
+            const isWaiting = waiting.has(c.id);
             return (
-              <li key={c.id}>
+              <li key={c.id} className={isWaiting ? "border-l-4 border-warn bg-warn/10" : ""}>
                 <Link href={`/inbox/${c.id}`} className="flex items-center justify-between gap-4 p-4 hover:bg-paper">
                   <div className="min-w-0">
                     <div className="truncate font-medium">{contact.name || formatPhone(contact.wa_number)}</div>
@@ -53,7 +55,7 @@ export default async function InboxPage({ searchParams }: PageProps<"/inbox">) {
                   </div>
                   <div className="shrink-0 text-right">
                     <span className={`text-xs font-semibold ${c.status === "human" ? "text-warn" : "text-muted"}`}>
-                      {STATUS_LABEL[c.status]}
+                      {isWaiting ? "Yanıt bekliyor" : STATUS_LABEL[c.status]}
                     </span>
                     <div className="text-xs text-muted">{formatTime(c.last_message_at)}</div>
                   </div>

@@ -1,0 +1,117 @@
+{
+  "name": "Vetray Takip Mesajları",
+  "active": false,
+  "settings": { "executionOrder": "v1", "timezone": "Europe/Istanbul", "saveDataErrorExecution": "all", "saveDataSuccessExecution": "all" },
+  "nodes": [
+    {
+      "id": "b2e1d002-0000-4000-8000-000000000001",
+      "name": "Her 15 dakikada",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 300],
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] } }
+    },
+    {
+      "id": "b2e1d002-0000-4000-8000-000000000002",
+      "name": "Supabase: Bekleyen Takipler",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://kvvnkiipfpdujwbwzmfo.supabase.co/rest/v1/rpc/due_followups",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "b2e1d002-0000-4000-8000-000000000003",
+      "name": "İstemi Hazırla",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300],
+      "notes": "Evolution adresi ve instance adı burada. Bot akışındaki 'Mesajı Ayrıştır' düğümündeki değerlerle aynı olmalı.",
+      "parameters": {
+        "jsCode": "// Evolution ayarları: bot akışındaki değerlerle aynı olmalı\nconst EVOLUTION_URL = 'https://EVOLUTION-ADRESI.up.railway.app';\nconst EVOLUTION_INSTANCE = 'vetray';\n\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  if (!r.conversation_id || !r.wa_number) continue;\n\n  // Ardışık aynı roldeki mesajları birleştir, ilk mesaj müşteriden olsun\n  const messages = [];\n  for (const h of r.history ?? []) {\n    if (!h.content) continue;\n    const last = messages[messages.length - 1];\n    if (last && last.role === h.role) last.content += '\\n' + h.content;\n    else messages.push({ role: h.role, content: h.content });\n  }\n  while (messages.length && messages[0].role !== 'user') messages.shift();\n  if (!messages.length) continue;\n  // Son mesaj bizden: modelden yeni bir takip mesajı istenir\n  const task = r.kind === '24h'\n    ? 'Müşteri yaklaşık bir gündür yanıt vermedi. Nazik, kısa bir ikinci hatırlatma yazın.'\n    : 'Müşteri birkaç saattir yanıt vermedi. Nazik, kısa bir ilk takip mesajı yazın.';\n  messages.push({ role: 'user', content: '[Sistem notu, müşteri yazmadı] ' + task });\n\n  const system = [\n    'Siz Vetray adına WhatsApp üzerinden müşterilere takip mesajı yazan asistansınız.',\n    'Resmi ve kibar yazın, Türkçede \"siz\" dili kullanın. Müşteri İngilizce yazdıysa resmi ve kibar İngilizce kullanın. En fazla iki kısa cümle. Baskıcı olmayın, soru sorarak yardım teklif edin. Tire veya uzun tire karakteri kullanmayın. Emoji kullanmayın. Yalnızca mesaj metnini yazın, başka açıklama eklemeyin.',\n    'Yalnızca konuşma geçmişindeki ve işletme bilgisindeki bilgilere dayanın; fiyat, tarih veya taahhüt uydurmayın.',\n    r.system_prompt ? 'Konuşma tarzı:\\n' + r.system_prompt : '',\n    'İşletme bilgisi:\\n' + (r.business_info || '(henüz girilmedi)'),\n  ].filter(Boolean).join('\\n\\n');\n\n  out.push({ json: {\n    conversation_id: r.conversation_id,\n    wa_number: r.wa_number,\n    evolution_url: EVOLUTION_URL.replace(/\\/$/, ''),\n    evolution_instance: EVOLUTION_INSTANCE,\n    body: {\n      model: 'deepseek-v4.1-flash',\n      max_tokens: 2000,\n      messages: [{ role: 'system', content: system }, ...messages],\n    },\n  } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "b2e1d002-0000-4000-8000-000000000004",
+      "name": "EVREN: Takip Yaz",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 3000,
+      "credentials": { "httpHeaderAuth": { "name": "evren-api" } },
+      "parameters": {
+        "method": "POST",
+        "url": "https://evren-llmapi.ssyz.org.tr/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": { "timeout": 120000 }
+      }
+    },
+    {
+      "id": "b2e1d002-0000-4000-8000-000000000005",
+      "name": "Takibi Ayrıştır",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [880, 300],
+      "notes": "Model yanıtı boşsa veya içerik filtresine takılırsa o konuşma atlanır, mesaj gönderilmez.",
+      "parameters": {
+        "jsCode": "const out = [];\nconst items = $input.all();\nconst prevAll = $('İstemi Hazırla').all();\nfor (let i = 0; i < items.length; i++) {\n  const res = items[i].json;\n  const prev = prevAll[i].json;\n  const choice = (res.choices ?? [])[0];\n  if (!choice || choice.finish_reason === 'content_filter') continue;\n  const text = choice.message?.content;\n  const reply = typeof text === 'string' ? text.replace(/[\\u2013\\u2014]/g, ',').trim() : '';\n  if (reply) out.push({ json: { conversation_id: prev.conversation_id, wa_number: prev.wa_number, evolution_url: prev.evolution_url, evolution_instance: prev.evolution_instance, reply } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "b2e1d002-0000-4000-8000-000000000006",
+      "name": "Evolution: WhatsApp Gönder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.evolution_url }}/message/sendText/{{ $json.evolution_instance }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: $json.wa_number, text: $json.reply }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "b2e1d002-0000-4000-8000-000000000007",
+      "name": "Supabase: Takibi Kaydet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1320, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://kvvnkiipfpdujwbwzmfo.supabase.co/rest/v1/rpc/record_followup",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p: { conversation_id: $('Takibi Ayrıştır').item.json.conversation_id, text: $('Takibi Ayrıştır').item.json.reply, wa_message_id: $json.key?.id ?? '' } }) }}",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Her 15 dakikada": { "main": [[{ "node": "Supabase: Bekleyen Takipler", "type": "main", "index": 0 }]] },
+    "Supabase: Bekleyen Takipler": { "main": [[{ "node": "İstemi Hazırla", "type": "main", "index": 0 }]] },
+    "İstemi Hazırla": { "main": [[{ "node": "EVREN: Takip Yaz", "type": "main", "index": 0 }]] },
+    "EVREN: Takip Yaz": { "main": [[{ "node": "Takibi Ayrıştır", "type": "main", "index": 0 }]] },
+    "Takibi Ayrıştır": { "main": [[{ "node": "Evolution: WhatsApp Gönder", "type": "main", "index": 0 }]] },
+    "Evolution: WhatsApp Gönder": { "main": [[{ "node": "Supabase: Takibi Kaydet", "type": "main", "index": 0 }]] }
+  }
+}
